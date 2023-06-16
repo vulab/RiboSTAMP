@@ -1,2 +1,2 @@
 # RiboSTAMP
-RiboSTAMP: Investigating Ribosome Translation using APOBEC-Mediated Profiling
+RiboSTAMP: Investigating Ribosome Translation using Surveying Targets by APOBEC-Mediated Profiling

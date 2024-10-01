@@ -1,0 +1,625 @@
+---
+title: "Step07.PCA_DifferentialAnalysis"
+author: "Vu lab"
+date: "2023-06-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(rstatix)
+library(ggpubr)
+
+load(file = "output/Step02.TranscriptID_Geneid_Genename.rdata")
+
+load(file = "output/Step04.gene_epkm_rpkm_rbd_nsites.rdata")
+
+
+```
+
+
+
+
+
+
+
+
+
+
+# gene_EPKM Differential Analysis
+
+## EPKM * 1e3
+```{r}
+gene_epkm <- gene_epkm %>%  
+  rename_all(~ gsub("_EPKM", "", .)) %>%
+  mutate_all(~ ifelse(is.na(.), 0, .)) %>%
+  column_to_rownames(var = "Geneid") %>%
+  mutate_all(~ . * 1e3)
+```
+
+## differential expression analysis (limma-voom, edgeR)
+
+Using normalized gene expression values rather than raw counts. 
+DESeq2 requires raw count data as input for its statistical model to perform differential expression analysis. 
+Here, we can use other methods for differential expression analysis that can handle normalized gene expression data, such as limma-voom or edgeR.
+
+```{r}
+# Load necessary libraries
+library(limma)
+library(edgeR)
+library(ggplot2)
+
+# Subset the gene_epkm data frame to include only rows where the row sum is greater than 0
+gene_epkm <- gene_epkm[which(rowSums(gene_epkm) > 0),]
+
+# Display the dimensions of the resulting data frame
+dim(gene_epkm)
+
+# Create a factor variable condition with three levels
+condition <- factor(paste(rep(c("SCR", "shRNA33", "shRNA37"), each = 3)))
+
+coldata <- data.frame(row.names = colnames(gene_epkm), condition)
+
+# Create a DGEList object from the normalized gene expression data
+dge <- DGEList(counts = gene_epkm)
+
+# Apply the TMM normalization method using edgeR's calcNormFactors function
+dge <- calcNormFactors(dge)
+
+# Convert the normalized data to log2-counts per million (logCPM) using limma's voom function
+v <- voom(dge, normalize.method = "none")
+
+# Set up the design matrix for your experimental conditions
+design <- model.matrix(~0 + condition)
+colnames(design) <- levels(condition)
+
+# Fit the linear model and perform differential expression analysis
+fit <- lmFit(v, design)
+contrast.matrix <- makeContrasts(shRNA33_vs_SCR = shRNA33 - SCR, shRNA37_vs_SCR = shRNA37 - SCR, shRNA37_vs_shRNA33 = shRNA37 - shRNA33, levels = design)
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fit2 <- eBayes(fit2)
+
+# Extract the top differentially expressed genes for each contrast
+res_shRNA33_SCR <- topTable(fit2, number = Inf, coef = "shRNA33_vs_SCR")
+res_shRNA37_SCR <- topTable(fit2, number = Inf, coef = "shRNA37_vs_SCR")
+res_shRNA37_shRNA33 <- topTable(fit2, number = Inf, coef = "shRNA37_vs_shRNA33")
+
+# Perform PCA on the logCPM values
+pca <- prcomp(t(v$E), scale = TRUE)
+
+# Create a data frame with the first two principal components and the sample conditions
+pca_df <- data.frame(Sample = rownames(pca$x),
+                     PC1 = pca$x[, 1],
+                     PC2 = pca$x[, 2],
+                     Condition = coldata$condition)
+
+# Plot the PCA with ggplot2
+ggplot(pca_df, aes(x = PC1, y = PC2, color = Condition)) +
+  geom_point(size = 3) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  labs(title = "PCA plot", x = "PC1", y = "PC2") +
+  scale_color_discrete(name = "Condition")
+
+
+
+
+
+
+
+
+# Extract the replicate information from the sample names
+pca_df$Replicate <- gsub(".*(Rep\\d+).*", "\\1", pca_df$Sample)
+
+# Plot the PCA with ggplot2 and add sample labels
+ggplot(pca_df, aes(x = PC1, y = PC2, color = Condition)) +
+  geom_point(size = 3) +
+  geom_text(aes(label = Replicate), hjust = 0.3, vjust = 1.3, size = 3) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  labs(title = "PCA plot", x = "PC1", y = "PC2") +
+  scale_color_discrete(name = "Condition")
+
+
+```
+
+
+
+
+
+
+
+### SCR vs shRNA
+
+```{r}
+# create a factor variable condition with three levels
+condition2 <- factor(c("SCR", "SCR", "SCR", "shRNA", "shRNA", "shRNA", "shRNA", "shRNA", "shRNA"))
+
+
+coldata <- data.frame(row.names = colnames(gene_epkm), condition2)
+
+# Create a DGEList object from the normalized gene expression data
+dge <- DGEList(counts = gene_epkm)
+
+# Apply the TMM normalization method using edgeR's calcNormFactors function
+dge <- calcNormFactors(dge)
+
+# Convert the normalized data to log2-counts per million (logCPM) using limma's voom function
+v <- voom(dge, normalize.method = "none")
+
+# Set up the design matrix for your experimental condition2s
+design <- model.matrix(~0 + condition2)
+colnames(design) <- levels(condition2)
+
+# Fit the linear model and perform differential expression analysis
+fit <- lmFit(v, design)
+contrast.matrix <- makeContrasts(shRNA_vs_SCR = shRNA - SCR, levels = design)
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fit2 <- eBayes(fit2)
+
+# Extract the top differentially expressed genes for each contrast
+res_shRNA_SCR <- topTable(fit2, number = Inf, coef = "shRNA_vs_SCR")
+
+
+# Perform PCA on the logCPM values
+pca <- prcomp(t(v$E), scale = TRUE)
+
+# Create a data frame with the first two principal components and the sample condition2s
+pca_df <- data.frame(Sample = rownames(pca$x),
+                     PC1 = pca$x[, 1],
+                     PC2 = pca$x[, 2],
+                     condition2 = coldata$condition2)
+
+# Plot the PCA with ggplot2
+ggplot(pca_df, aes(x = PC1, y = PC2, color = condition2)) +
+  geom_point(size = 3) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  labs(title = "PCA plot", x = "PC1", y = "PC2") +
+  scale_color_discrete(name = "condition2")
+
+
+```
+
+
+
+
+## results
+
+when we give the different direction, just base on padj, not FoldChange.
+
+```{r}
+
+library(tidyverse)
+# res_shRNA33_SCR
+res_shRNA33_SCR <- as.data.frame(res_shRNA33_SCR)
+res_shRNA33_SCR <- res_shRNA33_SCR %>% 
+  rownames_to_column(var = "Geneid") %>%
+  left_join(Geneid_Genename, by="Geneid") %>%
+  dplyr::select(Geneid, Genename, log2FoldChange = logFC, pvalue = P.Value, padj = adj.P.Val) %>% 
+  mutate(direction = if_else(
+    padj > 0.05, 'ns', if_else(
+      abs(log2FoldChange) == 0, 'ns', if_else(
+        log2FoldChange > 0, 'up', 'down')
+    ))) %>% 
+  arrange(desc(abs(log2FoldChange))) 
+
+## group count
+group_by(res_shRNA33_SCR, direction) %>%
+  summarise(count=n())
+
+
+# res_shRNA37_SCR
+res_shRNA37_SCR <- as.data.frame(res_shRNA37_SCR)
+res_shRNA37_SCR <- res_shRNA37_SCR %>% 
+  rownames_to_column(var = "Geneid") %>%
+  left_join(Geneid_Genename, by="Geneid") %>%
+  dplyr::select(Geneid, Genename, log2FoldChange = logFC, pvalue = P.Value, padj = adj.P.Val) %>% 
+  mutate(direction = if_else(
+    padj > 0.05, 'ns', if_else(
+      abs(log2FoldChange) == 0, 'ns', if_else(
+        log2FoldChange > 0, 'up', 'down')
+    ))) %>%  
+  arrange(desc(abs(log2FoldChange)))   
+
+## group count
+group_by(res_shRNA37_SCR, direction) %>%
+  summarise(count=n())
+
+
+# res_shRNA37_shRNA33
+res_shRNA37_shRNA33 <- as.data.frame(res_shRNA37_shRNA33)
+res_shRNA37_shRNA33 <- res_shRNA37_shRNA33 %>% 
+  rownames_to_column(var = "Geneid") %>%
+  left_join(Geneid_Genename, by="Geneid") %>%
+  dplyr::select(Geneid, Genename, log2FoldChange = logFC, pvalue = P.Value, padj = adj.P.Val) %>% 
+ mutate(direction = if_else(
+    padj > 0.05, 'ns', if_else(
+      abs(log2FoldChange) == 0, 'ns', if_else(
+        log2FoldChange > 0, 'up', 'down')
+    ))) %>%  
+  arrange(desc(abs(log2FoldChange))) 
+
+## group count
+group_by(res_shRNA37_shRNA33, direction) %>%
+  summarise(count=n())
+
+
+# res_shRNA_SCR
+res_shRNA_SCR <- as.data.frame(res_shRNA_SCR)
+res_shRNA_SCR <- res_shRNA_SCR %>% 
+  rownames_to_column(var = "Geneid") %>%
+  left_join(Geneid_Genename, by="Geneid") %>%
+  dplyr::select(Geneid, Genename, log2FoldChange = logFC, pvalue = P.Value, padj = adj.P.Val) %>% 
+ mutate(direction = if_else(
+    padj > 0.05, 'ns', if_else(
+      abs(log2FoldChange) == 0, 'ns', if_else(
+        log2FoldChange > 0, 'up', 'down')
+    ))) %>%  
+  arrange(desc(abs(log2FoldChange))) 
+
+## group count
+group_by(res_shRNA_SCR, direction) %>%
+  summarise(count=n())
+```
+
+
+
+
+
+
+
+## save data
+
+```{r}
+
+
+# save as excel
+library(openxlsx)
+
+# Create a new workbook
+wb <- createWorkbook()
+
+# Add the data frames as sheets to the workbook
+## res_shRNA33_SCR
+addWorksheet(wb, "res_shRNA33_SCR")
+writeData(wb, "res_shRNA33_SCR", res_shRNA33_SCR)
+
+## res_shRNA37_SCR
+addWorksheet(wb, "res_shRNA37_SCR")
+writeData(wb, "res_shRNA37_SCR", res_shRNA37_SCR)
+
+## res_shRNA37_shRNA33
+addWorksheet(wb, "res_shRNA37_shRNA33")
+writeData(wb, "res_shRNA37_shRNA33", res_shRNA37_shRNA33)
+
+## res_shRNA_SCR
+addWorksheet(wb, "res_shRNA_SCR")
+writeData(wb, "res_shRNA_SCR", res_shRNA_SCR)
+
+# Save the workbook to a file
+saveWorkbook(wb, "output/Step07.gene_EPKM_DifferentialAnalysis.xlsx", overwrite = TRUE)
+
+```
+
+
+## Save gene_EPKM_Differential
+
+```{r}
+res_shRNA33_SCR_EPKM <- res_shRNA33_SCR  
+
+res_shRNA37_SCR_EPKM <- res_shRNA33_SCR 
+
+res_shRNA37_shRNA33_EPKM <- res_shRNA33_SCR 
+
+res_shRNA_SCR_EPKM <- res_shRNA33_SCR 
+
+
+save(res_shRNA33_SCR_EPKM,res_shRNA33_SCR_EPKM,res_shRNA37_SCR_EPKM,res_shRNA37_shRNA33_EPKM,res_shRNA_SCR_EPKM, file = "output/Step07.EPKM_differential.rdata")
+
+```
+
+
+
+# gene_nsites Differential Analysis
+```{r}
+
+gene_nsites <- gene_nsites %>%  
+  rename_all(~ gsub("_nsites", "", .)) %>%
+  mutate_all(~ ifelse(is.na(.), 0, .)) %>%
+  column_to_rownames(var = "Geneid")
+
+
+```
+
+## differential expression analysis (limma-voom, edgeR)
+
+Using normalized gene expression values rather than raw counts. 
+DESeq2 requires raw count data as input for its statistical model to perform differential expression analysis. 
+Here, we can use other methods for differential expression analysis that can handle normalized gene expression data, such as limma-voom or edgeR.
+
+```{r}
+# Load necessary libraries
+library(limma)
+library(edgeR)
+library(ggplot2)
+
+# Subset the gene_nsites data frame to include only rows where the row sum is greater than 0
+gene_nsites <- gene_nsites[which(rowSums(gene_nsites) > 0),]
+
+# Display the dimensions of the resulting data frame
+dim(gene_nsites)
+
+# Create a factor variable condition with three levels
+condition <- factor(paste(rep(c("SCR", "shRNA33", "shRNA37"), each = 3)))
+
+coldata <- data.frame(row.names = colnames(gene_nsites), condition)
+
+# Create a DGEList object from the normalized gene expression data
+dge <- DGEList(counts = gene_nsites)
+
+# Apply the TMM normalization method using edgeR's calcNormFactors function
+dge <- calcNormFactors(dge)
+
+# Convert the normalized data to log2-counts per million (logCPM) using limma's voom function
+v <- voom(dge, normalize.method = "none")
+
+# Set up the design matrix for your experimental conditions
+design <- model.matrix(~0 + condition)
+colnames(design) <- levels(condition)
+
+# Fit the linear model and perform differential expression analysis
+fit <- lmFit(v, design)
+contrast.matrix <- makeContrasts(shRNA33_vs_SCR = shRNA33 - SCR, shRNA37_vs_SCR = shRNA37 - SCR, shRNA37_vs_shRNA33 = shRNA37 - shRNA33, levels = design)
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fit2 <- eBayes(fit2)
+
+# Extract the top differentially expressed genes for each contrast
+res_shRNA33_SCR <- topTable(fit2, number = Inf, coef = "shRNA33_vs_SCR")
+res_shRNA37_SCR <- topTable(fit2, number = Inf, coef = "shRNA37_vs_SCR")
+res_shRNA37_shRNA33 <- topTable(fit2, number = Inf, coef = "shRNA37_vs_shRNA33")
+
+# Perform PCA on the logCPM values
+pca <- prcomp(t(v$E), scale = TRUE)
+
+# Create a data frame with the first two principal components and the sample conditions
+pca_df <- data.frame(Sample = rownames(pca$x),
+                     PC1 = pca$x[, 1],
+                     PC2 = pca$x[, 2],
+                     Condition = coldata$condition)
+
+# Plot the PCA with ggplot2
+ggplot(pca_df, aes(x = PC1, y = PC2, color = Condition)) +
+  geom_point(size = 3) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  labs(title = "PCA plot", x = "PC1", y = "PC2") +
+  scale_color_discrete(name = "Condition")
+
+
+
+
+
+
+
+
+# Extract the replicate information from the sample names
+pca_df$Replicate <- gsub(".*(Rep\\d+).*", "\\1", pca_df$Sample)
+
+# Plot the PCA with ggplot2 and add sample labels
+ggplot(pca_df, aes(x = PC1, y = PC2, color = Condition)) +
+  geom_point(size = 3) +
+  geom_text(aes(label = Replicate), hjust = 0.3, vjust = 1.3, size = 3) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  labs(title = "PCA plot", x = "PC1", y = "PC2") +
+  scale_color_discrete(name = "Condition")
+
+
+```
+
+
+
+
+
+
+
+### SCR vs shRNA
+
+```{r}
+# create a factor variable condition with three levels
+condition2 <- factor(c("SCR", "SCR", "SCR", "shRNA", "shRNA", "shRNA", "shRNA", "shRNA", "shRNA"))
+
+
+coldata <- data.frame(row.names = colnames(gene_nsites), condition2)
+
+# Create a DGEList object from the normalized gene expression data
+dge <- DGEList(counts = gene_nsites)
+
+# Apply the TMM normalization method using edgeR's calcNormFactors function
+dge <- calcNormFactors(dge)
+
+# Convert the normalized data to log2-counts per million (logCPM) using limma's voom function
+v <- voom(dge, normalize.method = "none")
+
+# Set up the design matrix for your experimental condition2s
+design <- model.matrix(~0 + condition2)
+colnames(design) <- levels(condition2)
+
+# Fit the linear model and perform differential expression analysis
+fit <- lmFit(v, design)
+contrast.matrix <- makeContrasts(shRNA_vs_SCR = shRNA - SCR, levels = design)
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fit2 <- eBayes(fit2)
+
+# Extract the top differentially expressed genes for each contrast
+res_shRNA_SCR <- topTable(fit2, number = Inf, coef = "shRNA_vs_SCR")
+
+
+# Perform PCA on the logCPM values
+pca <- prcomp(t(v$E), scale = TRUE)
+
+# Create a data frame with the first two principal components and the sample condition2s
+pca_df <- data.frame(Sample = rownames(pca$x),
+                     PC1 = pca$x[, 1],
+                     PC2 = pca$x[, 2],
+                     condition2 = coldata$condition2)
+
+# Plot the PCA with ggplot2
+ggplot(pca_df, aes(x = PC1, y = PC2, color = condition2)) +
+  geom_point(size = 3) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  labs(title = "PCA plot", x = "PC1", y = "PC2") +
+  scale_color_discrete(name = "condition2")
+
+
+```
+
+
+
+
+## results
+
+
+```{r}
+
+library(tidyverse)
+# res_shRNA33_SCR
+res_shRNA33_SCR <- as.data.frame(res_shRNA33_SCR)
+res_shRNA33_SCR <- res_shRNA33_SCR %>% 
+  rownames_to_column(var = "Geneid") %>%
+  left_join(Geneid_Genename, by="Geneid") %>%
+  dplyr::select(Geneid, Genename, log2FoldChange = logFC, pvalue = P.Value, padj = adj.P.Val) %>% 
+  mutate(direction = if_else(
+    padj > 0.05, 'ns', if_else(
+      abs(log2FoldChange) == 0, 'ns', if_else(
+        log2FoldChange > 0, 'up', 'down')
+    ))) %>%  
+  arrange(desc(abs(log2FoldChange))) 
+
+## group count
+group_by(res_shRNA33_SCR, direction) %>%
+  summarise(count=n())
+
+
+# res_shRNA37_SCR
+res_shRNA37_SCR <- as.data.frame(res_shRNA37_SCR)
+res_shRNA37_SCR <- res_shRNA37_SCR %>% 
+  rownames_to_column(var = "Geneid") %>%
+  left_join(Geneid_Genename, by="Geneid") %>%
+  dplyr::select(Geneid, Genename, log2FoldChange = logFC, pvalue = P.Value, padj = adj.P.Val) %>% 
+  mutate(direction = if_else(
+    padj > 0.05, 'ns', if_else(
+      abs(log2FoldChange) == 0, 'ns', if_else(
+        log2FoldChange > 0, 'up', 'down')
+    ))) %>%  
+  arrange(desc(abs(log2FoldChange)))   
+
+## group count
+group_by(res_shRNA37_SCR, direction) %>%
+  summarise(count=n())
+
+
+# res_shRNA37_shRNA33
+res_shRNA37_shRNA33 <- as.data.frame(res_shRNA37_shRNA33)
+res_shRNA37_shRNA33 <- res_shRNA37_shRNA33 %>% 
+  rownames_to_column(var = "Geneid") %>%
+  left_join(Geneid_Genename, by="Geneid") %>%
+  dplyr::select(Geneid, Genename, log2FoldChange = logFC, pvalue = P.Value, padj = adj.P.Val) %>% 
+  mutate(direction = if_else(
+    padj > 0.05, 'ns', if_else(
+      abs(log2FoldChange) == 0, 'ns', if_else(
+        log2FoldChange > 0, 'up', 'down')
+    ))) %>%  
+  arrange(desc(abs(log2FoldChange))) 
+
+## group count
+group_by(res_shRNA37_shRNA33, direction) %>%
+  summarise(count=n())
+
+
+# res_shRNA_SCR
+res_shRNA_SCR <- as.data.frame(res_shRNA_SCR)
+res_shRNA_SCR <- res_shRNA_SCR %>% 
+  rownames_to_column(var = "Geneid") %>%
+  left_join(Geneid_Genename, by="Geneid") %>%
+  dplyr::select(Geneid, Genename, log2FoldChange = logFC, pvalue = P.Value, padj = adj.P.Val) %>% 
+  mutate(direction = if_else(
+    padj > 0.05, 'ns', if_else(
+      abs(log2FoldChange) == 0, 'ns', if_else(
+        log2FoldChange > 0, 'up', 'down')
+    ))) %>%  
+  arrange(desc(abs(log2FoldChange))) 
+
+## group count
+group_by(res_shRNA_SCR, direction) %>%
+  summarise(count=n())
+```
+
+
+## save data
+
+```{r}
+
+
+# save as excel
+library(openxlsx)
+
+# Create a new workbook
+wb <- createWorkbook()
+
+# Add the data frames as sheets to the workbook
+## res_shRNA33_SCR
+addWorksheet(wb, "res_shRNA33_SCR")
+writeData(wb, "res_shRNA33_SCR", res_shRNA33_SCR)
+
+## res_shRNA37_SCR
+addWorksheet(wb, "res_shRNA37_SCR")
+writeData(wb, "res_shRNA37_SCR", res_shRNA37_SCR)
+
+## res_shRNA37_shRNA33
+addWorksheet(wb, "res_shRNA37_shRNA33")
+writeData(wb, "res_shRNA37_shRNA33", res_shRNA37_shRNA33)
+
+## res_shRNA_SCR
+addWorksheet(wb, "res_shRNA_SCR")
+writeData(wb, "res_shRNA_SCR", res_shRNA_SCR)
+
+# Save the workbook to a file
+saveWorkbook(wb, "output/Step07.gene_nsites_DifferentialAnalysis.xlsx", overwrite = TRUE)
+
+```
+
+
+
+
+
+## Save gene_nsites_Differential
+
+```{r}
+res_shRNA33_SCR_nsites <- res_shRNA33_SCR  
+
+res_shRNA37_SCR_nsites <- res_shRNA33_SCR 
+
+res_shRNA37_shRNA33_nsites <- res_shRNA33_SCR 
+
+res_shRNA_SCR_nsites <- res_shRNA33_SCR 
+
+
+save(res_shRNA33_SCR_nsites,res_shRNA33_SCR_nsites,res_shRNA37_SCR_nsites,res_shRNA37_shRNA33_nsites,res_shRNA_SCR_nsites, file = "output/Step07.nsites_differential.rdata")
+
+```
+
+
+
+
+
+
+
+
+
